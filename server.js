@@ -1,74 +1,70 @@
-const express = require('express');
-const cors = require('cors');
-const { webToApp } = require('./index');
+import express from 'express';
+import cors from 'cors';
+import { webToApp } from './webToApp.js';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Memory-based session storage (Render/Heroku fix - no file system)
-let globalSession = null;
+// Root route to prevent "Cannot GET /" error
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Web-to-App Maker API is running',
+    endpoints: {
+      register: 'POST /register',
+      generate: 'POST /generate',
+      getIcon: 'GET /icon/:name',
+    },
+  });
+});
 
+// Register a new user
 app.post('/register', async (req, res) => {
   try {
-    // Check if session exists in memory
-    if (globalSession && new Date() < new Date(globalSession.expiresAt)) {
-      return res.json({ success: true, code: 200, result: globalSession });
-    }
-
-    // Register new session
     const result = await webToApp.register();
-    if (result.success) {
-      globalSession = result.result; // Save to memory
-    }
-    res.json(result);
+    res.status(result.code).json(result);
   } catch (error) {
-    res.json({
+    res.status(500).json({
       success: false,
-      code: error?.response?.status || 500,
-      result: { error: error.message || "Registration failed" }
+      code: 500,
+      result: { error: `Server error: ${error.message}` },
     });
   }
 });
 
+// Generate an app
 app.post('/generate', async (req, res) => {
-  const { session, input } = req.body;
-  if (!session) {
-    return res.json({
-      success: false,
-      code: 401,
-      result: { error: "No session provided" }
-    });
-  }
   try {
-    const result = await webToApp.generate(session, input);
-    res.json(result);
+    const userSession = await webToApp.register();
+    if (!userSession.success) {
+      return res.status(userSession.code).json(userSession.result);
+    }
+    const result = await webToApp.generate(userSession.result, req.body);
+    res.status(result.code).json(result);
   } catch (error) {
-    res.json({
+    res.status(500).json({
       success: false,
-      code: error?.response?.status || 500,
-      result: { error: error.message || "Generation failed" }
+      code: 500,
+      result: { error: `Server error: ${error.message}` },
     });
   }
 });
 
-app.get('/task/:taskId', async (req, res) => {
-  const { taskId } = req.params;
+// Get icon URL
+app.get('/icon/:name', async (req, res) => {
   try {
-    const result = await webToApp.task(taskId);
-    res.json(result);
+    const { name } = req.params;
+    const { style } = req.query;
+    const result = webToApp.utils.getIcon(name, style);
+    res.status(result.code).json(result);
   } catch (error) {
-    res.json({
+    res.status(500).json({
       success: false,
-      code: error?.response?.status || 500,
-      result: { error: error.message || "Task failed" }
+      code: 500,
+      result: { error: `Server error: ${error.message}` },
     });
   }
-});
-
-// Optional: Root route for health check
-app.get('/', (req, res) => {
-  res.send('Web to APK Converter API is running! Use /register, /generate, or /task/:id');
 });
 
 const PORT = process.env.PORT || 3000;
